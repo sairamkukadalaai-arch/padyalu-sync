@@ -1,6 +1,5 @@
 "use client";
-"use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
 
 type Difficulty = "beginner" | "medium" | "advanced";
 type SyncStatus = "perfect" | "good" | "warning" | "error";
