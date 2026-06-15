@@ -923,10 +923,10 @@ export default function App() {
             <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Waveform Comparison</div>
             {[["Reference", "#4f46e5", 0], ["Your Voice", final >= 70 ? "#22c55e" : "#ef4444", final < 70 ? 0.5 : 0.08]].map(([lbl, col, sh]) => (
               <div key={lbl} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: col, marginBottom: 3 }}>{lbl}</div>
+                <div style={{ fontSize: 10, color: col as string, marginBottom: 3 }}>{lbl}</div>
                 <div style={{ display: "flex", gap: 1.5, height: 32, alignItems: "center", background: "#0a0f1e", padding: "3px 8px", borderRadius: 6, overflow: "hidden" }}>
                   {Array.from({ length: 56 }, (_, i) => (
-                    <div key={i} style={{ flex: 1, height: Math.abs(Math.sin(i * 0.42 + sh) * 11) + 6 + Math.random() * 5, background: col, borderRadius: 1, opacity: 0.85 }} />
+                    <div key={i} style={{ flex: 1, height: Math.abs(Math.sin(i * 0.42 + (sh as number)) * 11) + 6 + Math.random() * 5, background: col, borderRadius: 1, opacity: 0.85 }} />
                   ))}
                 </div>
               </div>
