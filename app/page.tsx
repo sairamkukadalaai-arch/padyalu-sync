@@ -37,6 +37,8 @@ interface AnalysisResult {
   final: number;
   lineResults: AnalysisLineResult[];
   tips: string[];
+  refWave: number[];
+  usrWave: number[];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -50,32 +52,29 @@ const AUDIO_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA/
 const AUDIO_SRC = `data:audio/mpeg;base64,${AUDIO_B64}`;
 
 // ─── PER-POEM TIMESTAMPS in the single MP3 ────────────────────────────────────
-// Total audio: 382.78s · First 7s = music intro (skipped)
-// Each poem plays only its segment; progress bar reflects that segment only
 const TS = [
-  { start: 7.00, end: 26.58 },  // P1
-  { start: 27.78, end: 46.00 },  // P2
-  { start: 47.00, end: 63.00 },  // P3
-  { start: 65.55, end: 84.00 },  // P4
-  { start: 85.80, end: 101.50 },  // P5
-  { start: 102.00, end: 120.48 },  // P6
-  { start: 123.68, end: 140.28 },  // P7
-  { start: 143.00, end: 169.06 },  // P8
-  { start: 162.00, end: 180.00 },  // P9
-  { start: 183.00, end: 203.00 },  // P10
-  { start: 205.00, end: 224.00 },  // P11
-  { start: 226.50, end: 245.16 },  // P12
-  { start: 247.00, end: 265.00 },  // P13
-  { start: 268.00, end: 288.00 },  // P14
-  { start: 290.00, end: 310.00 },  // P15
-  { start: 312.00, end: 330.00 },  // P16
-  { start: 333.00, end: 350.00 },  // P17
-  { start: 352.00, end: 370.00 },  // P18
+  { start: 7.00, end: 26.58 },
+  { start: 27.78, end: 46.00 },
+  { start: 47.00, end: 63.00 },
+  { start: 65.55, end: 84.00 },
+  { start: 85.80, end: 101.50 },
+  { start: 102.00, end: 120.48 },
+  { start: 123.68, end: 140.28 },
+  { start: 143.00, end: 169.06 },
+  { start: 162.00, end: 180.00 },
+  { start: 183.00, end: 203.00 },
+  { start: 205.00, end: 224.00 },
+  { start: 226.50, end: 245.16 },
+  { start: 247.00, end: 265.00 },
+  { start: 268.00, end: 288.00 },
+  { start: 290.00, end: 310.00 },
+  { start: 312.00, end: 330.00 },
+  { start: 333.00, end: 350.00 },
+  { start: 352.00, end: 370.00 },
 ];
 
 // ─── 18 PADYALU — exact text from official transcript ────────────────────────
 const ALL_POEMS: Poem[] = [
-  // ── SUMATI SATAKAM (సుమతీ శతకము) P1-P9 ──────────────────────────────────
   {
     id: "p01", num: 1, src: "సుమతీ శతకము", srcEn: "Sumati Satakam", difficulty: "beginner",
     title: "తన కోపమే తన శత్రువు", titleEn: "Anger is One's Own Enemy",
@@ -175,7 +174,6 @@ const ALL_POEMS: Poem[] = [
       { tel: "చెరకున తీపెల్ల చెర రచు సిద్ధము సుమతి", en: "Cherakuna teepella chera rachu siddhamu sumati" },
     ]
   },
-  // ── VEMANA SATAKAM (వేమన శతకము) P10-P18 ────────────────────────────────
   {
     id: "p10", num: 10, src: "వేమన శతకము", srcEn: "Vemana Satakam", difficulty: "beginner",
     title: "అనగ అనగ రాగమతిశయిల్లుచునుండు", titleEn: "Practice Makes Perfect",
@@ -277,19 +275,307 @@ const ALL_POEMS: Poem[] = [
   },
 ];
 
+// ════════════════════════════════════════════════════════════════════════════
+// REAL AUDIO ANALYSIS ENGINE
+// Replaces random scoring with actual signal comparison:
+//   1. Decode reference segment + user recording to mono PCM
+//   2. Extract per-frame RMS energy + autocorrelation pitch
+//   3. Align the two feature sequences with Dynamic Time Warping (DTW)
+//   4. Derive sync / timing / rhythm scores and per-line feedback from the
+//      real alignment path — not from Math.random()
+// ════════════════════════════════════════════════════════════════════════════
+
+async function decodeToMono(buf: ArrayBuffer, targetSr = 16000): Promise<Float32Array> {
+  const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+  const ctx = new AC();
+  const audioBuf = await ctx.decodeAudioData(buf.slice(0));
+  const ch0 = audioBuf.getChannelData(0);
+  let mono: Float32Array;
+  if (audioBuf.numberOfChannels > 1) {
+    const ch1 = audioBuf.getChannelData(1);
+    mono = new Float32Array(ch0.length);
+    for (let i = 0; i < ch0.length; i++) mono[i] = (ch0[i] + ch1[i]) / 2;
+  } else {
+    mono = ch0;
+  }
+  const srcSr = audioBuf.sampleRate;
+  let out: Float32Array;
+  if (srcSr === targetSr) {
+    out = mono;
+  } else {
+    const ratio = targetSr / srcSr;
+    const outLen = Math.floor(mono.length * ratio);
+    out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcIdx = i / ratio;
+      const i0 = Math.floor(srcIdx), i1 = Math.min(i0 + 1, mono.length - 1);
+      const frac = srcIdx - i0;
+      out[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
+    }
+  }
+  await ctx.close();
+  return out;
+}
+
+interface FrameFeatures {
+  rms: number[];
+  pitch: number[];
+  hopSec: number;
+  times: number[];
+}
+
+function extractFeatures(samples: Float32Array, sr: number): FrameFeatures {
+  const frameLen = Math.round(sr * 0.04);
+  const hopLen = Math.round(sr * 0.02);
+  const nFrames = Math.max(1, Math.floor((samples.length - frameLen) / hopLen));
+  const rms: number[] = [];
+  const pitch: number[] = [];
+  const times: number[] = [];
+
+  for (let f = 0; f < nFrames; f++) {
+    const start = f * hopLen;
+    const frame = samples.subarray(start, start + frameLen);
+    let sumSq = 0;
+    for (let i = 0; i < frame.length; i++) sumSq += frame[i] * frame[i];
+    const e = Math.sqrt(sumSq / frame.length);
+    rms.push(e);
+    times.push(start / sr);
+
+    if (e > 0.01) {
+      const minLag = Math.floor(sr / 500);
+      const maxLag = Math.floor(sr / 70);
+      let bestLag = -1, bestCorr = 0;
+      for (let lag = minLag; lag <= maxLag && lag < frame.length; lag++) {
+        let corr = 0;
+        for (let i = 0; i < frame.length - lag; i++) corr += frame[i] * frame[i + lag];
+        if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+      }
+      pitch.push(bestLag > 0 ? sr / bestLag : 0);
+    } else {
+      pitch.push(0);
+    }
+  }
+  return { rms, pitch, hopSec: hopLen / sr, times };
+}
+
+function buildVectors(feat: FrameFeatures): number[][] {
+  const maxRms = Math.max(1e-6, ...feat.rms);
+  const maxPitch = Math.max(1, ...feat.pitch);
+  return feat.rms.map((r, i) => [
+    r / maxRms,
+    feat.pitch[i] > 0 ? feat.pitch[i] / maxPitch : 0,
+  ]);
+}
+
+function euclid(a: number[], b: number[]): number {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; }
+  return Math.sqrt(s);
+}
+
+function dtw(ref: number[][], usr: number[][]): { normCost: number; path: [number, number][] } {
+  const n = ref.length, m = usr.length;
+  if (n === 0 || m === 0) return { normCost: 999, path: [] };
+  const D: Float64Array[] = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(Infinity));
+  D[0][0] = 0;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const c = euclid(ref[i - 1], usr[j - 1]);
+      D[i][j] = c + Math.min(D[i - 1][j], D[i][j - 1], D[i - 1][j - 1]);
+    }
+  }
+  const path: [number, number][] = [];
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    path.push([i - 1, j - 1]);
+    const choices = [D[i - 1][j - 1], D[i - 1][j], D[i][j - 1]];
+    const minIdx = choices.indexOf(Math.min(...choices));
+    if (minIdx === 0) { i--; j--; }
+    else if (minIdx === 1) { i--; }
+    else { j--; }
+  }
+  path.reverse();
+  return { normCost: D[n][m] / (n + m), path };
+}
+
+function analyzeLines(
+  refFeat: FrameFeatures,
+  usrFeat: FrameFeatures,
+  path: [number, number][],
+  numLines: number
+): AnalysisLineResult[] {
+  const refTotalFrames = refFeat.rms.length;
+  const bounds: number[] = [];
+  for (let l = 0; l <= numLines; l++) bounds.push(Math.round((l / numLines) * refTotalFrames));
+
+  const results: AnalysisLineResult[] = [];
+  for (let l = 0; l < numLines; l++) {
+    const refStartF = bounds[l];
+    const refEndF = bounds[l + 1];
+    const matched = path.filter(([ri]) => ri >= refStartF && ri < refEndF);
+    if (matched.length === 0) {
+      results.push({ i: l, tel: "", status: "error", off: 0, tempo: 0, feedback: "No matching audio detected for this line" });
+      continue;
+    }
+    const usrIdxs = matched.map(([, ui]) => ui);
+    const usrStartF = Math.min(...usrIdxs);
+    const usrEndF = Math.max(...usrIdxs);
+
+    const refLineStartT = refFeat.times[refStartF] ?? 0;
+    const usrLineStartT = usrFeat.times[usrStartF] ?? 0;
+    const offsetSec = usrLineStartT - refLineStartT;
+
+    const refDur = (refFeat.times[refEndF - 1] ?? refLineStartT) - refLineStartT + refFeat.hopSec;
+    const usrDur = (usrFeat.times[usrEndF] ?? usrLineStartT) - usrLineStartT + usrFeat.hopSec;
+    const tempoRatio = refDur > 0 ? usrDur / refDur : 1;
+
+    const localCosts = matched.map(([ri, ui]) => {
+      const re = refFeat.rms[ri] ?? 0, ue = usrFeat.rms[ui] ?? 0;
+      return Math.abs(re - ue);
+    });
+    const avgLocalCost = localCosts.reduce((a, b) => a + b, 0) / localCosts.length;
+
+    let status: SyncStatus;
+    let feedback: string;
+    const absOffset = Math.abs(offsetSec);
+    const tempoDevPct = Math.abs(tempoRatio - 1) * 100;
+
+    if (avgLocalCost < 0.06 && absOffset < 0.25 && tempoDevPct < 8) {
+      status = "perfect"; feedback = "Perfect sync ✓";
+    } else if (absOffset >= 0.25 && tempoDevPct < 12) {
+      status = "good";
+      feedback = offsetSec > 0 ? `Started ${absOffset.toFixed(1)}s late` : `Started ${absOffset.toFixed(1)}s early`;
+    } else if (tempoDevPct >= 12 && tempoDevPct < 30) {
+      status = "warning";
+      feedback = tempoRatio > 1 ? `Sung ${Math.round(tempoDevPct)}% slower than reference` : `Sung ${Math.round(tempoDevPct)}% faster than reference`;
+    } else if (tempoDevPct >= 30 || avgLocalCost > 0.15) {
+      status = "error";
+      feedback = "Significant mismatch — re-listen to this line";
+    } else {
+      status = "good"; feedback = "Close match";
+    }
+
+    results.push({ i: l, tel: "", status, off: +offsetSec.toFixed(2), tempo: +tempoRatio.toFixed(2), feedback });
+  }
+  return results;
+}
+
+function downsampleEnvelope(samples: Float32Array, buckets = 56): number[] {
+  const out: number[] = [];
+  const bucketSize = Math.max(1, Math.floor(samples.length / buckets));
+  for (let b = 0; b < buckets; b++) {
+    const start = b * bucketSize;
+    const end = Math.min(samples.length, start + bucketSize);
+    let peak = 0;
+    for (let i = start; i < end; i++) peak = Math.max(peak, Math.abs(samples[i]));
+    out.push(peak);
+  }
+  return out;
+}
+
+// Slice the embedded base64 MP3 down to just the reference segment's raw bytes,
+// re-encoded as a WAV ArrayBuffer so decodeAudioData can read an exact time range.
+async function extractReferenceSegment(startSec: number, endSec: number): Promise<ArrayBuffer> {
+  const res = await fetch(AUDIO_SRC);
+  const fullBuf = await res.arrayBuffer();
+  const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+  const ctx = new AC();
+  const decoded = await ctx.decodeAudioData(fullBuf.slice(0));
+  const sr = decoded.sampleRate;
+  const startSample = Math.floor(startSec * sr);
+  const endSample = Math.min(decoded.length, Math.floor(endSec * sr));
+  const len = Math.max(1, endSample - startSample);
+  const nCh = decoded.numberOfChannels;
+
+  // Build a minimal WAV (PCM16) for just this slice
+  const slice = new Float32Array(len);
+  const ch0 = decoded.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    let v = ch0[startSample + i] || 0;
+    if (nCh > 1) {
+      const ch1 = decoded.getChannelData(1);
+      v = (v + (ch1[startSample + i] || 0)) / 2;
+    }
+    slice[i] = v;
+  }
+  await ctx.close();
+
+  const wavBuf = new ArrayBuffer(44 + len * 2);
+  const view = new DataView(wavBuf);
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF"); view.setUint32(4, 36 + len * 2, true); writeStr(8, "WAVE");
+  writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, sr, true); view.setUint32(28, sr * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  writeStr(36, "data"); view.setUint32(40, len * 2, true);
+  for (let i = 0; i < len; i++) {
+    const s = Math.max(-1, Math.min(1, slice[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return wavBuf;
+}
+
+async function runRealAnalysis(
+  poemStartSec: number,
+  poemEndSec: number,
+  userBlob: Blob,
+  numLines: number
+): Promise<AnalysisResult> {
+  const SR = 16000;
+  const [refSegBuf, userBuf] = await Promise.all([
+    extractReferenceSegment(poemStartSec, poemEndSec),
+    userBlob.arrayBuffer(),
+  ]);
+
+  const [refSamples, usrSamples] = await Promise.all([
+    decodeToMono(refSegBuf, SR),
+    decodeToMono(userBuf, SR),
+  ]);
+
+  const refFeat = extractFeatures(refSamples, SR);
+  const usrFeat = extractFeatures(usrSamples, SR);
+  const refVec = buildVectors(refFeat);
+  const usrVec = buildVectors(usrFeat);
+  const { normCost, path } = dtw(refVec, usrVec);
+
+  const sync = Math.max(0, Math.min(100, Math.round(100 - normCost * 140)));
+  const lineResults = analyzeLines(refFeat, usrFeat, path, numLines);
+
+  const avgAbsOffset = lineResults.reduce((s, l) => s + Math.abs(l.off), 0) / Math.max(1, lineResults.length);
+  const timing = Math.max(0, Math.min(100, Math.round(100 - avgAbsOffset * 60)));
+
+  const avgTempoDev = lineResults.reduce((s, l) => s + Math.abs(l.tempo - 1), 0) / Math.max(1, lineResults.length);
+  const rhythm = Math.max(0, Math.min(100, Math.round(100 - avgTempoDev * 110)));
+
+  const final = Math.round(sync * 0.5 + timing * 0.3 + rhythm * 0.2);
+
+  const tips = lineResults
+    .filter(l => l.status !== "perfect")
+    .map(l => {
+      if (l.status === "error") return `Line ${l.i + 1}: ${l.feedback} — listen closely and re-record`;
+      if (l.status === "warning") return l.tempo > 1 ? `Line ${l.i + 1}: Speed up slightly to match the reference pace` : `Line ${l.i + 1}: Slow down slightly to match the reference pace`;
+      return `Line ${l.i + 1}: Start ${l.off > 0 ? "a bit earlier" : "a bit later"} to align with the reference`;
+    });
+
+  return {
+    sync, timing, rhythm, final, lineResults, tips,
+    refWave: downsampleEnvelope(refSamples),
+    usrWave: downsampleEnvelope(usrSamples),
+  };
+}
+
 // ─── AUDIO ENGINE — plays only the poem's segment of the single MP3 ───────────
 function useAudio() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const segRef = useRef<{ start: number; end: number }>({ start: 0, end: 382.78 }); // current poem's segment
+  const segRef = useRef<{ start: number; end: number }>({ start: 0, end: 382.78 });
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
   const [speed, setSpeed] = useState(1.0);
-  const [elapsed, setElapsed] = useState(0);  // seconds into THIS poem
-  const [segDur, setSegDur] = useState(0);  // duration of THIS poem
+  const [elapsed, setElapsed] = useState(0);
+  const [segDur, setSegDur] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Build the single Audio element once
   useEffect(() => {
     const a = new Audio();
     a.preload = "auto";
@@ -301,7 +587,6 @@ function useAudio() {
     return () => { a.pause(); a.src = ""; };
   }, []);
 
-  // Poll position during playback & auto-stop at segment end
   useEffect(() => {
     if (!playing) {
       if (elapsedRef.current !== null) clearInterval(elapsedRef.current);
@@ -324,7 +609,6 @@ function useAudio() {
     };
   }, [playing]);
 
-  // Load a poem's segment (seek to start, don't play yet)
   const loadPoem = useCallback((poemIndex: number) => {
     const seg = TS[poemIndex];
     segRef.current = seg;
@@ -338,7 +622,6 @@ function useAudio() {
   const play = useCallback(() => {
     const a = audioRef.current;
     if (!a) return;
-    // If we've reached the end of the segment, restart it
     if (a.currentTime >= segRef.current.end) {
       a.currentTime = segRef.current.start;
       setElapsed(0);
@@ -375,33 +658,77 @@ function useAudio() {
   return { playing, loading, ready, speed, elapsed, segDur, play, pause, restart, loadPoem, seekInSegment, changeSpeed };
 }
 
-// ─── ANALYSIS ENGINE ──────────────────────────────────────────────────────────
-function runAnalysis(poemId: string): AnalysisResult {
-  const poem = ALL_POEMS.find(p => p.id === poemId);
-  const lines = poem?.lines || [];
-  const base = 60 + Math.random() * 35;
-  const lineResults = lines.map((line, i) => {
-    const r = Math.random();
-    const off = +((Math.random() - 0.5) * 1.2).toFixed(2);
-    const tempo = +(0.85 + Math.random() * 0.35).toFixed(2);
-    let status: SyncStatus;
-    let feedback = "";
-    if (r > 0.68) { status = "perfect"; feedback = "Perfect sync ✓"; }
-    else if (r > 0.42) { status = "good"; feedback = off > 0 ? `${Math.abs(off).toFixed(1)}s early` : `${Math.abs(off).toFixed(1)}s late`; }
-    else if (r > 0.22) { status = "warning"; feedback = tempo > 1.05 ? `${Math.round((tempo - 1) * 100)}% too fast` : `${Math.round((1 - tempo) * 100)}% too slow`; }
-    else { status = "error"; feedback = "Needs more practice"; }
-    return { i, tel: line.tel, status, off, tempo, feedback };
-  });
-  const sync = Math.round(base);
-  const timing = Math.round(58 + Math.random() * 37);
-  const rhythm = Math.round(65 + Math.random() * 30);
-  const final = Math.round(sync * 0.5 + timing * 0.3 + rhythm * 0.2);
-  const tips = lineResults.filter(l => l.status !== "perfect").map(l =>
-    l.status === "error" ? `Line ${l.i + 1}: Listen carefully to the reference for this line` :
-      l.status === "warning" ? (l.tempo > 1.05 ? `Line ${l.i + 1}: Slow down slightly` : `Line ${l.i + 1}: Speed up slightly`) :
-        `Line ${l.i + 1}: Start ${l.off > 0 ? "a bit later" : "a bit earlier"}`
-  );
-  return { sync, timing, rhythm, final, lineResults, tips };
+// ─── MICROPHONE RECORDER — real MediaRecorder capture ─────────────────────────
+function useRecorder() {
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = useCallback(async () => {
+    setError(null);
+    setRecordedBlob(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mime });
+        setRecordedBlob(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      rec.start();
+      mediaRecRef.current = rec;
+      setRecording(true);
+    } catch (e) {
+      console.error("Mic access failed:", e);
+      setError("Microphone access denied or unavailable. Please allow microphone permission and try again.");
+      setRecording(false);
+    }
+  }, []);
+
+  const stop = useCallback(() => {
+    mediaRecRef.current?.stop();
+    setRecording(false);
+  }, []);
+
+  const reset = useCallback(() => {
+    setRecordedBlob(null);
+    setError(null);
+  }, []);
+
+  return { recording, recordedBlob, error, start, stop, reset };
+}
+
+// Play back an arbitrary Blob (used for the user's own recording)
+function useBlobPlayer() {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const urlRef = useRef<string | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const play = useCallback((blob: Blob) => {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    const url = URL.createObjectURL(blob);
+    urlRef.current = url;
+    const a = new Audio(url);
+    a.onended = () => setPlaying(false);
+    audioRef.current = a;
+    a.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }, []);
+
+  const stop = useCallback(() => {
+    audioRef.current?.pause();
+    setPlaying(false);
+  }, []);
+
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+
+  return { playing, play, stop };
 }
 
 // ─── SESSION STORAGE ──────────────────────────────────────────────────────────
@@ -461,6 +788,18 @@ function Wave({ active, color = "#6366f1", bars = 44 }: { active: boolean; color
   );
 }
 
+// Static (real-data) waveform bar, used in the results comparison view
+function StaticWave({ data, color }: { data: number[]; color: string }) {
+  const maxV = Math.max(0.001, ...data);
+  return (
+    <div style={{ display: "flex", gap: 1.5, height: 32, alignItems: "center", background: "#0a0f1e", padding: "3px 8px", borderRadius: 6, overflow: "hidden" }}>
+      {data.map((v, i) => (
+        <div key={i} style={{ flex: 1, height: 4 + (v / maxV) * 24, background: color, borderRadius: 1, opacity: 0.85 }} />
+      ))}
+    </div>
+  );
+}
+
 function Diff({ level }: { level: Difficulty }) {
   const m: Record<Difficulty, { bg: string; tc: string; lbl: string }> = {
     beginner: { bg: "#064e3b", tc: "#6ee7b7", lbl: "Beginner" },
@@ -476,10 +815,8 @@ export default function App() {
   const [view, setView] = useState<"home" | "practice" | "record" | "results" | "admin">("home");
   const [poem, setPoem] = useState<Poem | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recDone, setRecDone] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [recSecs, setRecSecs] = useState(0);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showTel, setShowTel] = useState(true);
   const [showEn, setShowEn] = useState(true);
@@ -488,10 +825,14 @@ export default function App() {
   const [adminPwd, setAdminPwd] = useState("");
   const [adminAuth, setAdminAuth] = useState(false);
   const [adminMsg, setAdminMsg] = useState("");
-  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const lineTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const ss = useSS();
   const audio = useAudio();
+  const recorder = useRecorder();
+  const refPlayer = useBlobPlayer(); // plays the reference segment slice (for results view)
+  const usrPlayer = useBlobPlayer(); // plays the user's own recording
+  const [recSecs, setRecSecs] = useState(0);
+  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const s = ss.get<Record<string, number>>("scores");
@@ -503,7 +844,6 @@ export default function App() {
     ss.set("scores", ns);
   };
 
-  // Karaoke line sync — driven by poem segment duration
   useEffect(() => {
     if (!audio.playing || !poem) return;
     if (lineTimer.current !== null) clearInterval(lineTimer.current);
@@ -523,38 +863,61 @@ export default function App() {
   }, [audio.playing, audio.segDur, audio.speed, poem]);
 
   useEffect(() => {
-    if (recording) {
+    if (recorder.recording) {
+      setRecSecs(0);
       recTimer.current = setInterval(() => setRecSecs(s => s + 1), 1000);
     } else if (recTimer.current !== null) {
       clearInterval(recTimer.current);
     }
-    return () => {
-      if (recTimer.current !== null) clearInterval(recTimer.current);
-    };
-  }, [recording]);
+    return () => { if (recTimer.current !== null) clearInterval(recTimer.current); };
+  }, [recorder.recording]);
 
   const goPoem = (p: Poem) => {
     setPoem(p); setView("practice"); setCurLine(0);
-    setRecDone(false); setRecSecs(0); setAnalysis(null);
+    recorder.reset(); setAnalysis(null); setAnalyzeError(null);
     audio.pause();
-    audio.loadPoem(p.num - 1); // num is 1-based, TS is 0-based
+    audio.loadPoem(p.num - 1);
   };
+
   const startRec = () => {
     let c = 3; setCountdown(c);
-    const cd = setInterval(() => { c--; if (c > 0) setCountdown(c); else { clearInterval(cd); setCountdown(null); setRecording(true); setRecSecs(0); } }, 1000);
+    const cd = setInterval(() => {
+      c--;
+      if (c > 0) setCountdown(c);
+      else { clearInterval(cd); setCountdown(null); recorder.start(); }
+    }, 1000);
   };
-  const stopRec = () => { setRecording(false); setRecDone(true); };
-  const resetRec = () => { setRecDone(false); setRecSecs(0); setAnalysis(null); };
+  const stopRec = () => { recorder.stop(); };
+  const resetRec = () => { recorder.reset(); setAnalysis(null); setAnalyzeError(null); };
+
   const doAnalysis = async () => {
-    if (!poem) return;
+    if (!poem || !recorder.recordedBlob) return;
     setAnalyzing(true);
-    await new Promise<void>(r => setTimeout(r, 2000));
-    const res = runAnalysis(poem.id);
-    setAnalysis(res);
-    saveScore(poem.id, res.final);
-    setAnalyzing(false);
-    setView("results");
+    setAnalyzeError(null);
+    try {
+      const seg = TS[poem.num - 1];
+      const res = await runRealAnalysis(seg.start, seg.end, recorder.recordedBlob, poem.lines.length);
+      setAnalysis(res);
+      saveScore(poem.id, res.final);
+      setView("results");
+    } catch (e) {
+      console.error("Analysis failed:", e);
+      setAnalyzeError("Could not analyze the recording. Please try recording again.");
+    } finally {
+      setAnalyzing(false);
+    }
   };
+
+  const playReferenceSegment = useCallback(async () => {
+    if (!poem) return;
+    const seg = TS[poem.num - 1];
+    try {
+      const wavBuf = await extractReferenceSegment(seg.start, seg.end);
+      refPlayer.play(new Blob([wavBuf], { type: "audio/wav" }));
+    } catch (e) {
+      console.error("Reference playback failed:", e);
+    }
+  }, [poem, refPlayer]);
 
   const done = Object.keys(scores).length;
   const avgSc = done > 0 ? Math.round(Object.values(scores).reduce((a, b) => a + b, 0) / done) : 0;
@@ -698,7 +1061,6 @@ export default function App() {
               </div>
             </div>
           )}
-          {/* Audio Player */}
           <div style={{ ...card, background: "linear-gradient(135deg,#0f172a,#1e1b4b)" }}>
             <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
               Reference Audio — Poem {poem.num} Only
@@ -725,7 +1087,6 @@ export default function App() {
                 {fmt(audio.elapsed)} / {fmt(poemDur)}
               </span>
             </div>
-            {/* Progress bar — scoped to this poem's segment only */}
             <div style={{ height: 5, background: "#1e293b", borderRadius: 3, marginBottom: 8, cursor: "pointer", overflow: "hidden" }}
               onClick={e => { const r = e.currentTarget.getBoundingClientRect(); audio.seekInSegment((e.clientX - r.left) / r.width); }}>
               <div style={{
@@ -736,12 +1097,10 @@ export default function App() {
             <Wave active={audio.playing} color="#6366f1" />
             {!audio.ready && <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6 }}>⏳ Audio loading... please wait a moment</div>}
           </div>
-          {/* Text toggles */}
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <button onClick={() => setShowTel(!showTel)} style={{ ...btn(showTel ? "pri" : "ghost"), padding: "5px 12px", fontSize: 11 }}>{showTel ? "✓" : "○"} Telugu</button>
             <button onClick={() => setShowEn(!showEn)} style={{ ...btn(showEn ? "ok" : "ghost"), padding: "5px 12px", fontSize: 11 }}>{showEn ? "✓" : "○"} Transliteration</button>
           </div>
-          {/* Karaoke display */}
           <div style={card}>
             <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
               {audio.playing ? "▶ Karaoke Mode — Follow the highlighted line" : "Read Along"}
@@ -791,18 +1150,23 @@ export default function App() {
         )}
         <div style={{
           ...card, textAlign: "center",
-          background: recording ? "linear-gradient(135deg,#1a0000,#3d0000)" : "#0f172a",
-          border: `1px solid ${recording ? "#dc2626" : "#1e293b"}`, transition: "all 0.3s"
+          background: recorder.recording ? "linear-gradient(135deg,#1a0000,#3d0000)" : "#0f172a",
+          border: `1px solid ${recorder.recording ? "#dc2626" : "#1e293b"}`, transition: "all 0.3s"
         }}>
-          {!recDone && !recording && countdown === null && (
+          {recorder.error && (
+            <div style={{ background: "#1a0000", border: "1px solid #7f1d1d", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#fca5a5", fontSize: 12 }}>
+              ⚠ {recorder.error}
+            </div>
+          )}
+          {!recorder.recordedBlob && !recorder.recording && countdown === null && (
             <>
               <div style={{ fontSize: 44, marginBottom: 10 }}>🎙</div>
               <div style={{ fontSize: 15, color: "#94a3b8", marginBottom: 6 }}>Ready to record?</div>
-              <p style={{ fontSize: 12, color: "#475569", marginBottom: 18, lineHeight: 1.6 }}>Allow microphone access when prompted. A 3-second countdown will begin before recording starts. Sing the poem as you practiced.</p>
+              <p style={{ fontSize: 12, color: "#475569", marginBottom: 18, lineHeight: 1.6 }}>Allow microphone access when prompted. A 3-second countdown will begin before recording starts. Sing the poem as you practiced — your voice will be compared against the actual reference audio.</p>
               <button style={btn("ok")} onClick={startRec}>🎙 Start Recording</button>
             </>
           )}
-          {recording && (
+          {recorder.recording && (
             <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ width: 9, height: 9, background: "#ef4444", borderRadius: "50%", animation: "pulse 1s infinite" }} />
@@ -812,20 +1176,24 @@ export default function App() {
               <div style={{ marginTop: 14 }}><button style={btn("red")} onClick={stopRec}>⏹ Stop Recording</button></div>
             </>
           )}
-          {recDone && !analyzing && (
+          {recorder.recordedBlob && !analyzing && (
             <>
-              <div style={{ fontSize: 13, color: "#4ade80", marginBottom: 10, fontWeight: 600 }}>✓ Recording complete — {fmt(recSecs)}</div>
+              <div style={{ fontSize: 13, color: "#4ade80", marginBottom: 10, fontWeight: 600 }}>✓ Recording complete</div>
               <Wave active={false} color="#4ade80" />
               <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14, flexWrap: "wrap" }}>
+                <button style={{ ...btn("ghost"), fontSize: 12 }} onClick={() => usrPlayer.play(recorder.recordedBlob!)}>
+                  {usrPlayer.playing ? "▶ Playing..." : "▶ Play My Recording"}
+                </button>
                 <button style={btn("ghost")} onClick={resetRec}>🔄 Re-record</button>
                 <button style={btn("pri")} onClick={doAnalysis}>🤖 Analyze →</button>
               </div>
+              {analyzeError && <div style={{ marginTop: 12, fontSize: 12, color: "#f87171" }}>{analyzeError}</div>}
             </>
           )}
           {analyzing && (
             <div style={{ padding: "18px 0" }}>
               <div style={{ fontSize: 14, color: "#93c5fd", marginBottom: 14 }}>🔬 Analyzing synchronization...</div>
-              {["Extracting pitch features", "Running DTW alignment", "Scoring timing accuracy", "Generating feedback"].map((s, i) => (
+              {["Decoding reference & recording", "Extracting pitch & energy features", "Running DTW alignment", "Scoring timing & rhythm accuracy"].map((s, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, color: "#64748b", marginBottom: 6, justifyContent: "center" }}>
                   <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#4f46e5" }} />
                   {s}
@@ -834,7 +1202,7 @@ export default function App() {
             </div>
           )}
         </div>
-        {(recording || recDone) && (
+        {(recorder.recording || recorder.recordedBlob) && (
           <div style={card}>
             <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Reference Text</div>
             {poem.lines.map((line, i) => (
@@ -852,7 +1220,7 @@ export default function App() {
 
   // ══ RESULTS ═════════════════════════════════════════════════════════════════
   if (view === "results" && analysis && poem) {
-    const { sync, timing, rhythm, final, lineResults, tips } = analysis;
+    const { sync, timing, rhythm, final, lineResults, tips, refWave, usrWave } = analysis;
     const sc = { perfect: { c: "#4ade80", bg: "#0f2318" }, good: { c: "#86efac", bg: "#0f2318" }, warning: { c: "#fbbf24", bg: "#1a1400" }, error: { c: "#f87171", bg: "#1a0000" } };
     return (
       <div style={{ minHeight: "100vh", background: BG, color: "#e2e8f0", fontFamily: "'Segoe UI',sans-serif" }}>
@@ -902,7 +1270,7 @@ export default function App() {
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
                   <div>
                     <div style={{ fontSize: 10, color: "#475569", marginBottom: 2 }}>Line {i + 1}</div>
-                    <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 3 }}>{lr.tel}</div>
+                    <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 3 }}>{poem.lines[i]?.tel}</div>
                     <div style={{ fontSize: 11, color: sc[lr.status].c, fontWeight: 600 }}>{lr.feedback}</div>
                   </div>
                   <div style={{ textAlign: "right", fontSize: 10, color: "#64748b", flexShrink: 0 }}>
@@ -919,18 +1287,28 @@ export default function App() {
               {tips.map((t, i) => <div key={i} style={{ fontSize: 12, color: "#86efac", marginBottom: 5, display: "flex", gap: 8 }}><span>→</span><span>{t}</span></div>)}
             </div>
           )}
+          {/* Waveform comparison — now uses REAL decoded audio data, each playable */}
           <div style={{ ...card, marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Waveform Comparison</div>
-            {[["Reference", "#4f46e5", 0], ["Your Voice", final >= 70 ? "#22c55e" : "#ef4444", final < 70 ? 0.5 : 0.08]].map(([lbl, col, sh]) => (
-              <div key={lbl} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: col as string, marginBottom: 3 }}>{lbl}</div>
-                <div style={{ display: "flex", gap: 1.5, height: 32, alignItems: "center", background: "#0a0f1e", padding: "3px 8px", borderRadius: 6, overflow: "hidden" }}>
-                  {Array.from({ length: 56 }, (_, i) => (
-                    <div key={i} style={{ flex: 1, height: Math.abs(Math.sin(i * 0.42 + (sh as number)) * 11) + 6 + Math.random() * 5, background: col, borderRadius: 1, opacity: 0.85 }} />
-                  ))}
-                </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: "#4f46e5", fontWeight: 700 }}>Reference</span>
+                <button style={{ ...btn("ghost"), padding: "2px 10px", fontSize: 10 }} onClick={playReferenceSegment}>
+                  {refPlayer.playing ? "⏸" : "▶"} Play
+                </button>
               </div>
-            ))}
+              <StaticWave data={refWave} color="#4f46e5" />
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: final >= 70 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>Your Voice</span>
+                <button style={{ ...btn("ghost"), padding: "2px 10px", fontSize: 10 }}
+                  onClick={() => recorder.recordedBlob && usrPlayer.play(recorder.recordedBlob)}>
+                  {usrPlayer.playing ? "⏸" : "▶"} Play
+                </button>
+              </div>
+              <StaticWave data={usrWave} color={final >= 70 ? "#22c55e" : "#ef4444"} />
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
             <button style={btn("ghost")} onClick={() => { resetRec(); setView("record"); }}>🔄 Try Again</button>
