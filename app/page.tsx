@@ -686,7 +686,7 @@ export default function App() {
 
   const signOut = async () => {
     await supabaseRef.current.auth.signOut();
-    router.push("/login");
+    window.location.href = "/login";
   };
 
   const submitFeedback = async () => {
@@ -890,7 +890,7 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {profile && <span style={{ fontSize: 11, color: "#64748b" }}>👤 {profile.username}</span>}
           {profile?.role === "admin" && (
-            <button style={{ ...btn("ghost"), padding: "5px 12px", fontSize: 12 }} onClick={() => router.push("/admin")}>⚙ Admin</button>
+            <button style={{ ...btn("warn"), padding: "5px 12px", fontSize: 12 }} onClick={() => router.push("/admin")}>⚙ Admin</button>
           )}
           <button style={{ ...btn("ghost"), padding: "5px 12px", fontSize: 12 }} onClick={signOut}>Sign Out</button>
         </div>
@@ -959,17 +959,23 @@ export default function App() {
             );
           })}
         </div>
-        {overallTips.length > 0 && (
-          <div style={{ ...card, marginTop: 24, background: "#0c1a0a", border: "1px solid #166534" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#4ade80", marginBottom: 10 }}>💡 Your Overall Suggestions</div>
-            <p style={{ fontSize: 11, color: "#64748b", marginBottom: 10 }}>The most common feedback across your recent attempts:</p>
-            {overallTips.map((t, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#86efac", marginBottom: 5, display: "flex", gap: 8 }}>
-                <span>→</span><span>{t}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        <div style={{ ...card, marginTop: 24, background: "#0c1a0a", border: "1px solid #166534" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#4ade80", marginBottom: 10 }}>💡 Your Overall Suggestions</div>
+          {overallTips.length > 0 ? (
+            <>
+              <p style={{ fontSize: 11, color: "#64748b", marginBottom: 10 }}>The most common feedback across your recent attempts:</p>
+              {overallTips.map((t, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#86efac", marginBottom: 5, display: "flex", gap: 8 }}>
+                  <span>→</span><span>{t}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: "#475569" }}>
+              Record and submit a poem to get personalised improvement suggestions here.
+            </p>
+          )}
+        </div>
         <div style={{ ...card, marginTop: 16, background: "#0a0f1e" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", marginBottom: 10 }}>How to Practice</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 10 }}>

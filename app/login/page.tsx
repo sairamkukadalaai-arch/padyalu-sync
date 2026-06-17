@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 // Supabase Auth only speaks "email + password" — we give the user a plain
@@ -14,7 +13,6 @@ function usernameToEmail(username: string) {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -69,8 +67,10 @@ export default function LoginPage() {
         setBusy(false);
         return;
       }
-      router.push("/");
-      router.refresh();
+      // Hard navigation so the browser sends the fresh auth cookies on the
+      // next request — soft router.push() can race the cookie write and leave
+      // the middleware seeing no session, looping back to /login.
+      window.location.href = "/";
     } catch {
       setError("Something went wrong. Please try again.");
       setBusy(false);
