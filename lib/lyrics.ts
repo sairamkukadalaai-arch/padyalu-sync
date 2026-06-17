@@ -51,6 +51,9 @@ export function lyricsSimilarity(transcript: string, referenceText: string): num
   const b = normalizeTelugu(referenceText);
   if (!a || !b) return 0;
   const dist = levenshtein(a, b);
-  const sim = 1 - dist / Math.max(a.length, b.length);
-  return Math.round(Math.max(0, Math.min(1, sim)) * 100);
+  const raw = 1 - dist / Math.max(a.length, b.length);
+  // Apply a gentle curve: character-level Levenshtein is strict for Telugu
+  // (diacritics, conjuncts) so boost scores — e.g. raw 0.55 → ~72, raw 0.75 → ~86
+  const boosted = Math.pow(Math.max(0, raw), 0.65);
+  return Math.round(Math.min(1, boosted) * 100);
 }

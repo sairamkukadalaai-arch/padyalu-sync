@@ -791,11 +791,11 @@ export default function App() {
       // available (e.g. unsupported recording codec, STT not configured),
       // fall back to raw.final (sync/timing/rhythm only).
       const final = lyricsScore !== null
-        ? Math.round(lyricsScore * 0.45 + raw.sync * 0.25 + raw.timing * 0.20 + raw.rhythm * 0.10)
+        ? Math.round(lyricsScore * 0.25 + raw.sync * 0.35 + raw.timing * 0.25 + raw.rhythm * 0.15)
         : raw.final;
 
-      const tips = lyricsScore !== null && lyricsScore < 70
-        ? [`Your recited words matched only ${lyricsScore}% of the poem's text — review the lyrics carefully before re-recording.`, ...raw.tips]
+      const tips = lyricsScore !== null && lyricsScore < 50
+        ? [`Your recited words matched ${lyricsScore}% of the poem's text — try reviewing the lyrics and re-recording.`, ...raw.tips]
         : raw.tips;
 
       const res: AnalysisResult = { ...raw, tips, final, lyricsScore, transcript };
