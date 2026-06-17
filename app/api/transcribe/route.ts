@@ -41,6 +41,9 @@ export async function POST(request: Request) {
   outgoing.append("file", audio, `recording.${ext}`);
   outgoing.append("model", "whisper-1");
   outgoing.append("response_format", "json");
+  // 'te' (ISO 639-1) caused a 400 on whisper-1, so we steer it via prompt
+  // instead — Whisper uses the prompt language to bias its detection.
+  outgoing.append("prompt", "తెలుగు పద్యం పఠనం. సుమతీ శతకము. వేమన శతకము.");
 
   try {
     const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
