@@ -614,6 +614,7 @@ export default function App() {
   const [user, setUser] = useState<{ id: string } | null>(null);
   const [profile, setProfile] = useState<{ username: string; role: string } | null>(null);
   const [overallTips, setOverallTips] = useState<string[]>([]);
+  const [leaderboard, setLeaderboard] = useState<{ username: string; poems_done: number; avg_score: number }[]>([]);
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
   const lineTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -654,6 +655,10 @@ export default function App() {
         for (const a of attempts) best[a.poem_id] = Math.max(best[a.poem_id] ?? 0, a.final_score);
         setScores(best);
       }
+
+      const { data: lb } = await supabase.rpc("get_leaderboard");
+      if (lb) setLeaderboard(lb as { username: string; poems_done: number; avg_score: number }[]);
+
       setAuthChecked(true);
     })();
   }, [router]);
@@ -827,7 +832,9 @@ export default function App() {
       transcript: res.transcript || null,
       tips: res.tips,
     });
-    if (error) console.error("Failed to save attempt:", error);
+    if (error) { console.error("Failed to save attempt:", error); return; }
+    const { data: lb } = await supabaseRef.current.rpc("get_leaderboard");
+    if (lb) setLeaderboard(lb as { username: string; poems_done: number; avg_score: number }[]);
   };
 
   const playReferenceSegment = useCallback(async () => {
@@ -959,7 +966,56 @@ export default function App() {
             );
           })}
         </div>
-        <div style={{ ...card, marginTop: 24, background: "#0c1a0a", border: "1px solid #166534" }}>
+        {/* ── LEADERBOARD ─────────────────────────────────────────────── */}
+        <div style={{ ...card, marginTop: 24, background: "#0a0f1e", border: "1px solid #1e293b" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", marginBottom: 12 }}>🏆 Leaderboard</div>
+          {leaderboard.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#475569" }}>No practice attempts yet — be the first on the board!</p>
+          ) : (
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 280 }}>
+                <thead>
+                  <tr style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left" }}>
+                    <th style={{ padding: "4px 8px", width: 32 }}>#</th>
+                    <th style={{ padding: "4px 8px" }}>Username</th>
+                    <th style={{ padding: "4px 8px", textAlign: "center" }}>Practiced</th>
+                    <th style={{ padding: "4px 8px", textAlign: "center" }}>Avg Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaderboard.map((row, i) => {
+                    const isMe = row.username === profile?.username;
+                    const rankColor = i === 0 ? "#f59e0b" : i === 1 ? "#94a3b8" : i === 2 ? "#b45309" : "#475569";
+                    const scoreColor = row.avg_score >= 85 ? "#4ade80" : row.avg_score >= 65 ? "#93c5fd" : row.avg_score > 0 ? "#fca5a5" : "#475569";
+                    return (
+                      <tr key={row.username} style={{
+                        borderTop: "1px solid #1e293b",
+                        background: isMe ? "#1e1b4b33" : "transparent",
+                      }}>
+                        <td style={{ padding: "9px 8px", fontWeight: 800, color: rankColor, fontSize: 12 }}>{i + 1}</td>
+                        <td style={{ padding: "9px 8px", color: isMe ? "#a5b4fc" : "#e2e8f0", fontWeight: isMe ? 700 : 500 }}>
+                          {row.username}{isMe && <span style={{ fontSize: 10, color: "#6366f1", marginLeft: 5 }}>you</span>}
+                        </td>
+                        <td style={{ padding: "9px 8px", textAlign: "center" }}>
+                          <span style={{
+                            background: row.poems_done === 18 ? "#166534" : "#1e293b",
+                            color: row.poems_done === 18 ? "#4ade80" : "#93c5fd",
+                            padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                          }}>{row.poems_done}/18</span>
+                        </td>
+                        <td style={{ padding: "9px 8px", textAlign: "center", color: scoreColor, fontWeight: 700 }}>
+                          {row.avg_score > 0 ? `${row.avg_score}%` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ ...card, marginTop: 16, background: "#0c1a0a", border: "1px solid #166534" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#4ade80", marginBottom: 10 }}>💡 Your Overall Suggestions</div>
           {overallTips.length > 0 ? (
             <>
