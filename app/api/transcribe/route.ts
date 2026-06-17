@@ -40,7 +40,6 @@ export async function POST(request: Request) {
   const outgoing = new FormData();
   outgoing.append("file", audio, `recording.${ext}`);
   outgoing.append("model", "whisper-1");
-  outgoing.append("language", "te"); // Telugu
   outgoing.append("response_format", "json");
 
   try {
