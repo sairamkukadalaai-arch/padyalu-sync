@@ -302,6 +302,7 @@ async function extractReferenceSegment(url: string, startSec: number, endSec: nu
 }
 
 async function runRealAnalysis(
+  clipUrl: string,
   poemStartSec: number,
   poemEndSec: number,
   userBlob: Blob,
@@ -309,7 +310,7 @@ async function runRealAnalysis(
 ): Promise<RawAnalysis> {
   const SR = 16000;
   const [refSegBuf, userBuf] = await Promise.all([
-    extractReferenceSegment(poemStartSec, poemEndSec),
+    extractReferenceSegment(clipUrl, poemStartSec, poemEndSec),
     userBlob.arrayBuffer(),
   ]);
 
@@ -782,7 +783,7 @@ export default function App() {
     setAnalyzing(true);
     setAnalyzeError(null);
     try {
-      const raw = await runRealAnalysis(clip.start, clip.end, recorder.recordedBlob, poem.lines.length);
+      const raw = await runRealAnalysis(clip.url, clip.start, clip.end, recorder.recordedBlob, poem.lines.length);
 
       // Lyrics content check: send the recording to /api/transcribe (server-side
       // Whisper call — see that route for why this can't run in the browser)
