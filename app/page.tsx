@@ -487,16 +487,17 @@ function useRecorder() {
       // Run Web Speech API in parallel during recording (free STT on Android Chrome).
       // Collects all interim+final results; doAnalysis() uses this and falls back
       // to Whisper if empty (iOS, Firefox, browsers without te-IN support).
-      const SpeechRecAPI = window.SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
+      type AnySpeechRecognition = { new(): { lang: string; continuous: boolean; interimResults: boolean; maxAlternatives: number; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void; } };
+      const w = window as unknown as { SpeechRecognition?: AnySpeechRecognition; webkitSpeechRecognition?: AnySpeechRecognition };
+      const SpeechRecAPI = w.SpeechRecognition ?? w.webkitSpeechRecognition;
       if (SpeechRecAPI) {
         const sr = new SpeechRecAPI();
         sr.lang = "te-IN";
         sr.continuous = true;
         sr.interimResults = true;
         sr.maxAlternatives = 1;
-        let collected = "";
-        sr.onresult = (e: SpeechRecognitionEvent) => {
-          collected = Array.from(e.results).map(r => r[0].transcript).join(" ");
+        sr.onresult = (e) => {
+          const collected = Array.from(e.results).map(r => r[0].transcript).join(" ");
           setSpeechTranscript(collected);
         };
         sr.onerror = () => {};
