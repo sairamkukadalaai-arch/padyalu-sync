@@ -457,7 +457,7 @@ function useRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const speechRecRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
+  const speechRecRef = useRef<{ stop: () => void } | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [speechTranscript, setSpeechTranscript] = useState<string>("");
