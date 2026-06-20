@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback, type CSSProperties } from "re
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ALL_POEMS, TS } from "@/lib/poems";
-import { lyricsSimilarity } from "@/lib/lyrics";
+import { lyricsSimilarity, wordDiff, type WordDiffItem } from "@/lib/lyrics";
 
 type Difficulty = "beginner" | "medium" | "advanced";
 type SyncStatus = "perfect" | "good" | "warning" | "error";
@@ -53,6 +53,7 @@ interface RawAnalysis {
 interface AnalysisResult extends RawAnalysis {
   lyricsScore: number | null; // null when STT wasn't available
   transcript: string;
+  wordDiffResult: WordDiffItem[]; // word-level diff for highlight display
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -456,13 +457,16 @@ function useRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechRecRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [speechTranscript, setSpeechTranscript] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   const start = useCallback(async () => {
     setError(null);
     setRecordedBlob(null);
+    setSpeechTranscript("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -479,9 +483,31 @@ function useRecorder() {
       rec.start();
       mediaRecRef.current = rec;
       setRecording(true);
+
+      // Run Web Speech API in parallel during recording (free STT on Android Chrome).
+      // Collects all interim+final results; doAnalysis() uses this and falls back
+      // to Whisper if empty (iOS, Firefox, browsers without te-IN support).
+      const SpeechRecAPI = window.SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
+      if (SpeechRecAPI) {
+        const sr = new SpeechRecAPI();
+        sr.lang = "te-IN";
+        sr.continuous = true;
+        sr.interimResults = true;
+        sr.maxAlternatives = 1;
+        let collected = "";
+        sr.onresult = (e: SpeechRecognitionEvent) => {
+          collected = Array.from(e.results).map(r => r[0].transcript).join(" ");
+          setSpeechTranscript(collected);
+        };
+        sr.onerror = () => {};
+        sr.start();
+        speechRecRef.current = sr;
+      }
+
       // Auto-stop after MAX_RECORD_SECS
       autoStopRef.current = setTimeout(() => {
         mediaRecRef.current?.stop();
+        try { speechRecRef.current?.stop(); } catch {}
         setRecording(false);
       }, MAX_RECORD_SECS * 1000);
     } catch (e) {
@@ -494,15 +520,17 @@ function useRecorder() {
   const stop = useCallback(() => {
     if (autoStopRef.current) { clearTimeout(autoStopRef.current); autoStopRef.current = null; }
     mediaRecRef.current?.stop();
+    try { speechRecRef.current?.stop(); } catch {}
     setRecording(false);
   }, []);
 
   const reset = useCallback(() => {
     setRecordedBlob(null);
+    setSpeechTranscript("");
     setError(null);
   }, []);
 
-  return { recording, recordedBlob, error, start, stop, reset };
+  return { recording, recordedBlob, speechTranscript, error, start, stop, reset };
 }
 
 // Play back an arbitrary Blob (used for the user's own recording)
@@ -785,30 +813,36 @@ export default function App() {
     try {
       const raw = await runRealAnalysis(clip.url, clip.start, clip.end, recorder.recordedBlob, poem.lines.length);
 
-      // Lyrics content check: send the recording to /api/transcribe (server-side
-      // Whisper call — see that route for why this can't run in the browser)
-      // and compare the transcript against the poem's actual text. This is
-      // what catches "high score despite completely wrong words", since the
-      // DTW engine above only ever compares timing/energy, never word content.
-      let transcript = "";
+      // Lyrics content check: during recording, capture via Web Speech API in
+      // parallel (free, instant on Android Chrome with te-IN). After recording
+      // stops we compare whatever was captured; fall back to Whisper if empty
+      // (covers iOS and browsers without Telugu STT support).
+      let transcript = recorder.speechTranscript ?? "";
       let lyricsScore: number | null = null;
-      try {
-        const fd = new FormData();
-        const ext = recorder.recordedBlob.type.includes("mp4") ? "mp4" : "webm";
-        fd.append("audio", recorder.recordedBlob, `recording.${ext}`);
-        const r = await fetch("/api/transcribe", { method: "POST", body: fd });
-        if (r.ok) {
-          const data = await r.json();
-          if (typeof data.transcript === "string") transcript = data.transcript;
-        } else {
-          console.warn("Transcription unavailable:", r.status);
+      let wordDiffResult: WordDiffItem[] = [];
+
+      // Fall back to Whisper when Web Speech returned nothing
+      if (!transcript.trim()) {
+        try {
+          const fd = new FormData();
+          const ext = recorder.recordedBlob.type.includes("mp4") ? "mp4" : "webm";
+          fd.append("audio", recorder.recordedBlob, `recording.${ext}`);
+          const r = await fetch("/api/transcribe", { method: "POST", body: fd });
+          if (r.ok) {
+            const data = await r.json();
+            if (typeof data.transcript === "string") transcript = data.transcript;
+          } else {
+            console.warn("Transcription unavailable:", r.status);
+          }
+        } catch (e) {
+          console.error("Transcription request failed:", e);
         }
-      } catch (e) {
-        console.error("Transcription request failed:", e);
       }
+
       if (transcript.trim()) {
         const referenceText = poem.lines.map(l => l.tel).join(" ");
         lyricsScore = lyricsSimilarity(transcript, referenceText);
+        wordDiffResult = wordDiff(transcript, referenceText);
       }
 
       // Final score: lyrics content is the heaviest-weighted factor (catching
@@ -824,7 +858,7 @@ export default function App() {
         ? [`Your recited words matched ${lyricsScore}% of the poem's text — try reviewing the lyrics and re-recording.`, ...raw.tips]
         : raw.tips;
 
-      const res: AnalysisResult = { ...raw, tips, final, lyricsScore, transcript };
+      const res: AnalysisResult = { ...raw, tips, final, lyricsScore, transcript, wordDiffResult };
       setAnalysis(res);
       await saveAttempt(poem, res);
       setView("results");
@@ -1274,7 +1308,7 @@ export default function App() {
 
   // ══ RESULTS ═════════════════════════════════════════════════════════════════
   if (view === "results" && analysis && poem) {
-    const { sync, timing, rhythm, final, lyricsScore, transcript, lineResults, tips, refWave, usrWave } = analysis;
+    const { sync, timing, rhythm, final, lyricsScore, transcript, wordDiffResult, lineResults, tips, refWave, usrWave } = analysis;
     const sc = { perfect: { c: "#4ade80", bg: "#0f2318" }, good: { c: "#86efac", bg: "#0f2318" }, warning: { c: "#fbbf24", bg: "#1a1400" }, error: { c: "#f87171", bg: "#1a0000" } };
     return (
       <div style={{ minHeight: "100vh", background: BG, color: "#e2e8f0", fontFamily: "'Segoe UI',sans-serif" }}>
@@ -1327,8 +1361,37 @@ export default function App() {
           </div>
           {transcript.trim() && (
             <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>What We Heard (Speech-to-Text)</div>
-              <div style={{ fontSize: 14, color: "#94a3b8", lineHeight: 1.7 }}>{transcript}</div>
+              <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Word-by-Word Check</div>
+              <div style={{ fontSize: 10, color: "#475569", marginBottom: 10, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <span><span style={{ color: "#4ade80" }}>●</span> Correct</span>
+                <span><span style={{ color: "#fbbf24" }}>●</span> Mispronounced</span>
+                <span><span style={{ color: "#f87171" }}>●</span> Missed</span>
+              </div>
+              {wordDiffResult.length > 0 ? (
+                <div style={{ lineHeight: 2.2, fontSize: 15 }}>
+                  {wordDiffResult.map((item, idx) => {
+                    const clr = item.status === "correct" ? "#4ade80" : item.status === "wrong" ? "#fbbf24" : "#f87171";
+                    const bg  = item.status === "correct" ? "#0f231822" : item.status === "wrong" ? "#1a140022" : "#1a000022";
+                    return (
+                      <span key={idx} title={item.status} style={{
+                        display: "inline-block", margin: "2px 4px",
+                        padding: "1px 7px", borderRadius: 5,
+                        background: bg, border: `1px solid ${clr}55`,
+                        color: clr, fontWeight: item.status !== "correct" ? 700 : 400,
+                      }}>
+                        {item.word}
+                        {item.status === "missed" && <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.7 }}>✗</span>}
+                        {item.status === "wrong"  && <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.7 }}>~</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7 }}>{transcript}</div>
+              )}
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 8 }}>
+                Raw transcript: <span style={{ color: "#64748b" }}>{transcript}</span>
+              </div>
             </div>
           )}
           <div style={{ ...card, marginBottom: 14 }}>
