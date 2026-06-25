@@ -1425,8 +1425,8 @@ export default function App() {
             <div style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 10, color: "#4f46e5", fontWeight: 700 }}>Reference</span>
-                <button style={{ ...btn("ghost"), padding: "2px 10px", fontSize: 10 }} onClick={playReferenceSegment}>
-                  {refPlayer.playing ? "⏸" : "▶"} Play
+                <button style={{ ...btn("ghost"), padding: "2px 10px", fontSize: 10 }} onClick={refPlayer.playing ? refPlayer.stop : playReferenceSegment}>
+                  {refPlayer.playing ? "⏹ Stop" : "▶ Play"}
                 </button>
               </div>
               <StaticWave data={refWave} color="#4f46e5" />
@@ -1435,8 +1435,8 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 10, color: final >= 70 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>Your Voice</span>
                 <button style={{ ...btn("ghost"), padding: "2px 10px", fontSize: 10 }}
-                  onClick={() => { if (recorder.recordedBlob) { refPlayer.stop(); usrPlayer.play(recorder.recordedBlob); } }}>
-                  {usrPlayer.playing ? "⏸" : "▶"} Play
+                  onClick={() => { if (usrPlayer.playing) { usrPlayer.stop(); } else if (recorder.recordedBlob) { refPlayer.stop(); usrPlayer.play(recorder.recordedBlob); } }}>
+                  {usrPlayer.playing ? "⏹ Stop" : "▶ Play"}
                 </button>
               </div>
               <StaticWave data={usrWave} color={final >= 70 ? "#22c55e" : "#ef4444"} />
