@@ -1,5 +1,6 @@
 ﻿"use client";
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ALL_POEMS, TS } from "@/lib/poems";
@@ -948,7 +949,9 @@ export default function App() {
   if (view === "home") return (
     <div style={{ minHeight: "100vh", background: BG, color: "#e2e8f0", fontFamily: "'Segoe UI',sans-serif" }}>
       <div style={hdr}>
-        <span style={{ fontSize: 17, fontWeight: 800, background: "linear-gradient(90deg,#fbbf24,#f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>🎵 పద్యాల Sync</span>
+        <div style={{ background: "white", borderRadius: 8, padding: "3px 8px", display: "flex", alignItems: "center" }}>
+          <Image src="/sasj-logo1.webp" alt="Silicon Andhra" width={120} height={30} style={{ objectFit: "contain", display: "block" }} />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {profile && <span style={{ fontSize: 11, color: "#64748b" }}>👤 {profile.username}</span>}
           {profile?.role === "admin" && (
@@ -959,7 +962,8 @@ export default function App() {
       </div>
       <div style={{ background: "linear-gradient(160deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)", padding: "36px 16px 28px", textAlign: "center", borderBottom: "1px solid #1e293b" }}>
         <div style={{ fontSize: 11, color: "#f59e0b", letterSpacing: "0.18em", marginBottom: 6, fontFamily: "monospace", textTransform: "uppercase" }}>Silicon Andhra · Silver Jubilee · Oakland 2026</div>
-        <h1 style={{ fontSize: "clamp(26px,6vw,44px)", fontWeight: 900, margin: "0 0 4px", color: "#f1f5f9" }}>శతక సంఖారవం</h1>
+        <h1 style={{ fontSize: "clamp(18px,4.5vw,34px)", fontWeight: 900, margin: "0 0 2px", color: "#c9a227", lineHeight: 1.25 }}>సిలికానాంధ్ర రజతోత్సవం</h1>
+        <h2 style={{ fontSize: "clamp(14px,3.5vw,24px)", fontWeight: 700, margin: "0 0 4px", color: "#f1f5f9" }}>శతక శంఖారావం అభ్యాసం</h2>
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Guinness World Record Attempt · 1800+ participants · 18 Padyalu</div>
         {done > 0 && (
           <div style={{ display: "inline-flex", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, overflow: "hidden" }}>
@@ -1100,18 +1104,20 @@ export default function App() {
         </div>
         <div style={{ ...card, marginTop: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>Send Feedback to the Organizers</div>
-          <p style={{ fontSize: 11, color: "#64748b", marginBottom: 10 }}>Spotted an issue with a poem's text or timing, or have a suggestion? Admins can see this on their dashboard.</p>
-          <textarea
-            value={feedbackMsg}
-            onChange={e => setFeedbackMsg(e.target.value)}
-            placeholder="Type your feedback..."
-            rows={3}
-            style={{ width: "100%", boxSizing: "border-box", background: "#0a0f1e", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0", fontSize: 13, padding: "8px 10px", fontFamily: "inherit", resize: "vertical", marginBottom: 8 }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button style={btn(feedbackMsg.trim() ? "pri" : "ghost")} onClick={submitFeedback} disabled={!feedbackMsg.trim()}>Submit</button>
-            {feedbackSent && <span style={{ fontSize: 12, color: "#4ade80" }}>✓ Thanks — sent to the admins.</span>}
-          </div>
+          <p style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>Spotted an issue with a poem's text or timing, or have a suggestion? Fill out the form below.</p>
+          <a
+            href="https://forms.gle/PQhmtN4F1aDAtSUg9"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-block", padding: "9px 20px", borderRadius: 8,
+              background: "linear-gradient(90deg,#991b1b,#b91c1c)",
+              color: "white", fontWeight: 700, fontSize: 13, textDecoration: "none",
+              fontFamily: "inherit",
+            }}
+          >
+            Open Feedback Form →
+          </a>
         </div>
       </div>
     </div>

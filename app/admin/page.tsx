@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ALL_POEMS } from "@/lib/poems";
 import ClipManager from "./ClipManager";
+import UserManager from "./UserManager";
 
 // ════════════════════════════════════════════════════════════════════════════
 // /admin — server-rendered, role-gated dashboard.
@@ -189,6 +190,14 @@ export default async function AdminPage() {
               ))}
             </div>
           )}
+        </div>
+
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", marginBottom: 10 }}>User Management</div>
+        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 18, marginBottom: 16 }}>
+          <p style={{ fontSize: 11, color: "#64748b", marginBottom: 14 }}>
+            Create accounts for participants, update usernames/passwords, or remove users. Admin accounts cannot be deleted here.
+          </p>
+          <UserManager />
         </div>
 
         <div style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", marginBottom: 10 }}>Reference Audio Clips</div>
