@@ -97,8 +97,10 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div style={{ fontSize: 11, color: "#475569", textAlign: "center", marginTop: 14 }}>
-          Contact the organizer if you don't have an account.
+        <div style={{ fontSize: 11, textAlign: "center", marginTop: 14 }}>
+          <a href="https://forms.gle/PQhmtN4F1aDAtSUg9" target="_blank" rel="noopener noreferrer" style={{ color: "#c9a227", textDecoration: "underline" }}>
+            Need Help? Submit your issue here
+          </a>
         </div>
       </div>
     </div>
