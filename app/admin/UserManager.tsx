@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 interface UserRow {
@@ -12,8 +12,10 @@ interface UserRow {
 
 export default function UserManager() {
   const supabase = useRef(createClient());
+  const [query, setQuery] = useState("");
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [searched, setSearched] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const [newUsername, setNewUsername] = useState("");
@@ -30,14 +32,21 @@ export default function UserManager() {
     setTimeout(() => setMsg(null), 4000);
   };
 
-  const loadUsers = async () => {
-    setLoading(true);
-    const { data } = await supabase.current.from("profiles").select("id, username, role, created_at").order("created_at");
-    if (data) setUsers(data as UserRow[]);
-    setLoading(false);
-  };
+  const search = useCallback(async (q: string) => {
+    if (q.trim().length < 3) return;
+    setSearching(true);
+    setSearched(true);
+    cancelEdit();
+    const { data } = await supabase.current
+      .from("profiles")
+      .select("id, username, role, created_at")
+      .ilike("username", `%${q.trim()}%`)
+      .order("username");
+    setUsers((data ?? []) as UserRow[]);
+    setSearching(false);
+  }, []);
 
-  useEffect(() => { loadUsers(); }, []);
+  const refreshSearch = () => search(query);
 
   const createUser = async () => {
     if (!newUsername.trim() || newPassword.length < 6) {
@@ -51,7 +60,14 @@ export default function UserManager() {
     });
     const d = await r.json();
     if (!r.ok) { flash(`Create failed: ${d.error}`, false); }
-    else { flash(`User "${newUsername.trim()}" created.`, true); setNewUsername(""); setNewPassword(""); await loadUsers(); }
+    else {
+      flash(`User "${newUsername.trim()}" created.`, true);
+      setNewUsername(""); setNewPassword("");
+      // If current search would match the new user, refresh results
+      if (newUsername.trim().toLowerCase().includes(query.trim().toLowerCase()) && query.trim().length >= 3) {
+        await search(query);
+      }
+    }
     setCreating(false);
   };
 
@@ -75,7 +91,7 @@ export default function UserManager() {
     }
     flash("User updated.", true);
     cancelEdit();
-    await loadUsers();
+    await refreshSearch();
     setSaving(false);
   };
 
@@ -87,7 +103,7 @@ export default function UserManager() {
       body: JSON.stringify({ userId: u.id }),
     });
     if (!r.ok) { const d = await r.json(); flash(`Delete failed: ${d.error}`, false); }
-    else { flash(`User "${u.username}" deleted.`, true); await loadUsers(); }
+    else { flash(`User "${u.username}" deleted.`, true); await refreshSearch(); }
   };
 
   const inp: React.CSSProperties = {
@@ -122,40 +138,67 @@ export default function UserManager() {
         </div>
       </div>
 
-      {/* User list */}
-      {loading ? (
-        <div style={{ fontSize: 12, color: "#64748b" }}>Loading users…</div>
-      ) : (
-        <div style={{ display: "grid", gap: 8 }}>
-          {users.map(u => (
-            <div key={u.id} style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 10, padding: 12 }}>
-              {editId === u.id ? (
-                <div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                    <input style={inp} placeholder="New username" value={editUsername} onChange={e => setEditUsername(e.target.value)} />
-                    <input style={inp} placeholder="New password (leave blank to keep)" type="password" value={editPassword} onChange={e => setEditPassword(e.target.value)} />
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button style={btnStyle("ok")} onClick={saveEdit} disabled={saving}>{saving ? "Saving…" : "✓ Save"}</button>
-                    <button style={btnStyle("ghost")} onClick={cancelEdit}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{u.username}</span>
-                    {u.role === "admin" && <span style={{ fontSize: 10, color: "#f59e0b", marginLeft: 8, fontWeight: 700 }}>ADMIN</span>}
-                    <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>Joined {new Date(u.created_at).toLocaleDateString("en-IN")}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button style={btnStyle("warn")} onClick={() => startEdit(u)}>✏ Edit</button>
-                    {u.role !== "admin" && <button style={btnStyle("danger")} onClick={() => deleteUser(u)}>✕ Delete</button>}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+      {/* Search */}
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 10 }}>Search Users</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            style={{ ...inp, flex: 1 }}
+            placeholder="Type at least 3 characters…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search(query)}
+          />
+          <button
+            style={{ ...btnStyle("ok"), opacity: query.trim().length < 3 ? 0.4 : 1 }}
+            onClick={() => search(query)}
+            disabled={query.trim().length < 3 || searching}
+          >
+            {searching ? "Searching…" : "Search"}
+          </button>
         </div>
+        {query.trim().length > 0 && query.trim().length < 3 && (
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>Type at least 3 characters to search.</div>
+        )}
+      </div>
+
+      {/* Results */}
+      {searched && !searching && (
+        users.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#64748b", padding: "10px 0" }}>No users found matching "{query}".</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 11, color: "#475569", marginBottom: 2 }}>{users.length} result{users.length !== 1 ? "s" : ""}</div>
+            {users.map(u => (
+              <div key={u.id} style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 10, padding: 12 }}>
+                {editId === u.id ? (
+                  <div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <input style={inp} placeholder="New username" value={editUsername} onChange={e => setEditUsername(e.target.value)} />
+                      <input style={inp} placeholder="New password (leave blank to keep)" type="password" value={editPassword} onChange={e => setEditPassword(e.target.value)} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={btnStyle("ok")} onClick={saveEdit} disabled={saving}>{saving ? "Saving…" : "✓ Save"}</button>
+                      <button style={btnStyle("ghost")} onClick={cancelEdit}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{u.username}</span>
+                      {u.role === "admin" && <span style={{ fontSize: 10, color: "#f59e0b", marginLeft: 8, fontWeight: 700 }}>ADMIN</span>}
+                      <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>Joined {new Date(u.created_at).toLocaleDateString("en-IN")}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button style={btnStyle("warn")} onClick={() => startEdit(u)}>✏ Edit</button>
+                      {u.role !== "admin" && <button style={btnStyle("danger")} onClick={() => deleteUser(u)}>✕ Delete</button>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );
