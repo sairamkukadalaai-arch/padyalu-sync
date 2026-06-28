@@ -79,7 +79,8 @@ export default function LoginPage() {
 
           <input style={inp} placeholder="Full Name (e.g. Namrith Tejas Thatikonda)" value={username}
             onChange={e => setUsername(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && submit()} autoFocus />
+            onKeyDown={e => e.key === "Enter" && submit()}
+            autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} />
           <input style={inp} placeholder="Password" type="password" value={password}
             onChange={e => setPassword(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submit()} />
