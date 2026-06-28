@@ -1,16 +1,5 @@
 import { NextResponse } from "next/server";
 
-// ════════════════════════════════════════════════════════════════════════════
-// POST /api/transcribe
-// Receives the user's recorded audio (multipart form, field "audio"), forwards
-// it to OpenAI's Whisper transcription endpoint, and returns the recognized
-// Telugu text. This has to live server-side because it needs OPENAI_API_KEY,
-// which must never be sent to the browser — see SETUP.md for how to get a key
-// and where to put it. If you'd rather use Google Cloud Speech-to-Text or
-// Bhashini instead, swap the fetch() call below; the client only cares that
-// this route returns { transcript: string } or { error: string }.
-// ════════════════════════════════════════════════════════════════════════════
-
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -32,37 +21,55 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No audio file provided." }, { status: 400 });
   }
 
-  // Whisper picks the container format up from the filename extension, so
-  // give it one that matches what the browser's MediaRecorder produced
-  // (see useRecorder() in app/page.tsx — it records webm, falling back to mp4).
   const ext = audio.type.includes("mp4") ? "mp4" : "webm";
-
   const outgoing = new FormData();
   outgoing.append("file", audio, `recording.${ext}`);
   outgoing.append("model", "whisper-1");
   outgoing.append("response_format", "json");
-  // 'te' (ISO 639-1) caused a 400 on whisper-1, so we steer it via prompt
-  // instead — Whisper uses the prompt language to bias its detection.
   outgoing.append("prompt", "తెలుగు పద్యం పఠనం. సుమతీ శతకము. వేమన శతకము.");
 
-  try {
-    const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: outgoing,
-    });
+  // Retry up to 3 times on rate-limit (429) or transient server errors (5xx).
+  // Waits: 1s, 2s, 4s — stays well within the 10s Vercel function timeout.
+  const MAX_ATTEMPTS = 3;
+  let lastStatus = 0;
+  let lastBody = "";
 
-    if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      console.error("Whisper API error:", r.status, text);
-      return NextResponse.json({ error: "Transcription service error." }, { status: 502 });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let r: Response;
+    try {
+      r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: outgoing,
+      });
+    } catch (e) {
+      console.error(`Transcription network error (attempt ${attempt}):`, e);
+      if (attempt === MAX_ATTEMPTS)
+        return NextResponse.json({ error: "Transcription request failed." }, { status: 500 });
+      await sleep(attempt * 1000);
+      continue;
     }
 
-    const data = await r.json();
-    const transcript = typeof data.text === "string" ? data.text : "";
-    return NextResponse.json({ transcript });
-  } catch (e) {
-    console.error("Transcription request failed:", e);
-    return NextResponse.json({ error: "Transcription request failed." }, { status: 500 });
+    if (r.ok) {
+      const data = await r.json();
+      const transcript = typeof data.text === "string" ? data.text : "";
+      return NextResponse.json({ transcript });
+    }
+
+    lastStatus = r.status;
+    lastBody = await r.text().catch(() => "");
+
+    // Retry on rate limit or server errors; bail immediately on client errors
+    if (r.status !== 429 && r.status < 500) break;
+
+    console.warn(`Whisper ${r.status} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+    if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1000);
   }
+
+  console.error("Whisper API error after retries:", lastStatus, lastBody);
+  return NextResponse.json({ error: "Transcription service error." }, { status: 502 });
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

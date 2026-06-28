@@ -6,6 +6,12 @@ import { createClient } from "@/lib/supabase/client";
 import { ALL_POEMS, TS } from "@/lib/poems";
 import { lyricsSimilarity, wordDiff, type WordDiffItem } from "@/lib/lyrics";
 
+// Leaderboard is expensive (full-table aggregation). Cache it client-side for
+// 5 minutes so event-day bursts of simultaneous analyses don't each fire a
+// separate DB round-trip.
+const lbCache = { data: null as { username: string; poems_done: number; avg_score: number }[] | null, at: 0 };
+const LB_TTL_MS = 5 * 60 * 1000;
+
 type Difficulty = "beginner" | "medium" | "advanced";
 type SyncStatus = "perfect" | "good" | "warning" | "error";
 
@@ -694,8 +700,18 @@ export default function App() {
         setScores(best);
       }
 
-      const { data: lb } = await supabase.rpc("get_leaderboard");
-      if (lb) setLeaderboard(lb as { username: string; poems_done: number; avg_score: number }[]);
+      const now2 = Date.now();
+      if (lbCache.data && now2 - lbCache.at < LB_TTL_MS) {
+        setLeaderboard(lbCache.data);
+      } else {
+        const { data: lb } = await supabase.rpc("get_leaderboard");
+        if (lb) {
+          const typed = lb as { username: string; poems_done: number; avg_score: number }[];
+          lbCache.data = typed;
+          lbCache.at = now2;
+          setLeaderboard(typed);
+        }
+      }
 
       setAuthChecked(true);
     })();
@@ -890,8 +906,19 @@ export default function App() {
       tips: res.tips,
     });
     if (error) { console.error("Failed to save attempt:", error); return; }
-    const { data: lb } = await supabaseRef.current.rpc("get_leaderboard");
-    if (lb) setLeaderboard(lb as { username: string; poems_done: number; avg_score: number }[]);
+    // Use cached leaderboard if fresh; otherwise fetch and cache.
+    const now = Date.now();
+    if (lbCache.data && now - lbCache.at < LB_TTL_MS) {
+      setLeaderboard(lbCache.data);
+    } else {
+      const { data: lb } = await supabaseRef.current.rpc("get_leaderboard");
+      if (lb) {
+        const typed = lb as { username: string; poems_done: number; avg_score: number }[];
+        lbCache.data = typed;
+        lbCache.at = now;
+        setLeaderboard(typed);
+      }
+    }
   };
 
   const playReferenceSegment = useCallback(async () => {
