@@ -4,12 +4,6 @@ import { useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
-// Full Name -> email: "Namrith Tejas Thatikonda" -> "namrith.tejas.thatikonda@padyalu.local"
-function usernameToEmail(fullName: string) {
-  const clean = fullName.trim().toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "");
-  return `${clean}@padyalu.local`;
-}
-
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -24,9 +18,17 @@ export default function LoginPage() {
     if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
     setBusy(true);
     const supabase = createClient();
-    const email = usernameToEmail(username);
     try {
-      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+      // Look up the actual stored email by Full Name (case-insensitive) to avoid
+      // re-deriving it from potentially Unicode-mangled import data.
+      const { data: emailData, error: lookupErr } = await supabase
+        .rpc("find_email_by_username", { p_username: username.trim() });
+      if (lookupErr || !emailData) {
+        setError("Incorrect username or password.");
+        setBusy(false);
+        return;
+      }
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: emailData, password });
       if (signInErr) { setError("Incorrect username or password."); setBusy(false); return; }
       window.location.href = "/";
     } catch {
@@ -77,7 +79,7 @@ export default function LoginPage() {
             SIGN IN
           </div>
 
-          <input style={inp} placeholder="Full Name (e.g. Namrith Tejas Thatikonda)" value={username}
+          <input style={inp} placeholder="Full Name" value={username}
             onChange={e => setUsername(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submit()}
             autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} />
