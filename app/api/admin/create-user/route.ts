@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   if (!serviceKey) return NextResponse.json({ error: "Server not configured." }, { status: 503 });
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const email = `${username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "")}@padyalu.local`;
+  const email = `${username.trim().toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "")}@padyalu.local`;
 
   const { error } = await admin.auth.admin.createUser({
     email,

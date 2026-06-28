@@ -132,7 +132,7 @@ export default function UserManager() {
       <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 10, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 10 }}>Create New User</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input style={inp} placeholder="Username" value={newUsername} onChange={e => setNewUsername(e.target.value)} />
+          <input style={inp} placeholder="Full Name (e.g. Ravi Kumar)" value={newUsername} onChange={e => setNewUsername(e.target.value)} />
           <input style={inp} placeholder="Password (min 6 chars)" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
           <button style={btnStyle("ok")} onClick={createUser} disabled={creating}>{creating ? "Creating…" : "+ Create"}</button>
         </div>

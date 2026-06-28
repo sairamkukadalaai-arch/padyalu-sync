@@ -4,8 +4,9 @@ import { useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
-function usernameToEmail(username: string) {
-  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+// Full Name -> email: "Namrith Tejas Thatikonda" -> "namrith.tejas.thatikonda@padyalu.local"
+function usernameToEmail(fullName: string) {
+  const clean = fullName.trim().toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "");
   return `${clean}@padyalu.local`;
 }
 
@@ -15,11 +16,11 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const validUsername = /^[a-zA-Z0-9_.-]{3,24}$/.test(username.trim());
+  const validUsername = username.trim().length >= 2;
 
   const submit = async () => {
     setError("");
-    if (!validUsername) { setError("Username must be 3-24 characters: letters, numbers, _ . -"); return; }
+    if (!validUsername) { setError("Please enter your full name."); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
     setBusy(true);
     const supabase = createClient();
@@ -76,7 +77,7 @@ export default function LoginPage() {
             SIGN IN
           </div>
 
-          <input style={inp} placeholder="Username" value={username}
+          <input style={inp} placeholder="Full Name (e.g. Namrith Tejas Thatikonda)" value={username}
             onChange={e => setUsername(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submit()} autoFocus />
           <input style={inp} placeholder="Password" type="password" value={password}
