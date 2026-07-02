@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { ALL_POEMS } from "@/lib/poems";
 import ClipManager from "./ClipManager";
 import UserManager from "./UserManager";
@@ -72,10 +73,18 @@ export default async function AdminPage() {
 
   if (!myProfile || myProfile.role !== "admin") redirect("/");
 
+  // Use service role for admin data queries — bypasses RLS to reliably fetch
+  // all rows. The admin gate above already ensures only admins reach this point.
+  const svc = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
   const [{ data: profiles }, { data: attempts }, { data: suggestions }] = await Promise.all([
-    supabase.from("profiles").select("id, username, role, created_at").order("created_at", { ascending: true }).range(0, 4999),
-    supabase.from("attempts").select("user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at").range(0, 99999),
-    supabase.from("suggestions").select("id, user_id, poem_id, message, created_at").order("created_at", { ascending: false }),
+    svc.from("profiles").select("id, username, role, created_at").order("created_at", { ascending: true }).range(0, 9999),
+    svc.from("attempts").select("user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at").range(0, 999999),
+    svc.from("suggestions").select("id, user_id, poem_id, message, created_at").order("created_at", { ascending: false }).range(0, 9999),
   ]);
 
   const allProfiles = (profiles ?? []) as ProfileRow[];
