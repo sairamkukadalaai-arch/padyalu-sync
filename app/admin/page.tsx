@@ -73,8 +73,8 @@ export default async function AdminPage() {
   if (!myProfile || myProfile.role !== "admin") redirect("/");
 
   const [{ data: profiles }, { data: attempts }, { data: suggestions }] = await Promise.all([
-    supabase.from("profiles").select("id, username, role, created_at").order("created_at", { ascending: true }),
-    supabase.from("attempts").select("user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at"),
+    supabase.from("profiles").select("id, username, role, created_at").order("created_at", { ascending: true }).range(0, 4999),
+    supabase.from("attempts").select("user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at").range(0, 99999),
     supabase.from("suggestions").select("id, user_id, poem_id, message, created_at").order("created_at", { ascending: false }),
   ]);
 
