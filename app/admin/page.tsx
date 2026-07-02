@@ -114,6 +114,35 @@ export default async function AdminPage() {
     })
     .sort((a, b) => b.poemsDone - a.poemsDone);
 
+  // Users who have attempted at least one poem
+  const activeRows = rows.filter((r) => r.poemsDone > 0);
+
+  // Analytics helpers
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const recentAttempts = allAttempts.filter((a) => a.created_at >= oneWeekAgo);
+
+  function poemsCompleted(attemptList: AttemptRow[]) {
+    return attemptList.length;
+  }
+  function maxScore(attemptList: AttemptRow[]) {
+    if (attemptList.length === 0) return null;
+    return Math.max(...attemptList.map((a) => a.final_score));
+  }
+  function avgStats(attemptList: AttemptRow[]) {
+    if (attemptList.length === 0) return null;
+    const totalScore = attemptList.reduce((s, a) => s + a.final_score, 0);
+    return { poems: attemptList.length, pct: Math.round(totalScore / attemptList.length) };
+  }
+
+  const analytics = {
+    poemsLastWeek: poemsCompleted(recentAttempts),
+    poemsAllTime: poemsCompleted(allAttempts),
+    maxLastWeek: maxScore(recentAttempts),
+    maxAllTime: maxScore(allAttempts),
+    avgLastWeek: avgStats(recentAttempts),
+    avgAllTime: avgStats(allAttempts),
+  };
+
   const BG = "#030712";
   const card: React.CSSProperties = { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 18, marginBottom: 16 };
 
@@ -130,13 +159,41 @@ export default async function AdminPage() {
 
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "20px 14px" }}>
         <div style={{ background: "#1a0800", border: "1px solid #92400e", borderRadius: 10, padding: "10px 14px", marginBottom: 18, fontSize: 12, color: "#fbbf24" }}>
-          Signed in as <strong>{usernameById.get(user.id) ?? user.email}</strong> · {rows.length} non-admin user{rows.length === 1 ? "" : "s"} · {allAttempts.length} total attempts logged
+          Signed in as <strong>{usernameById.get(user.id) ?? user.email}</strong> · <strong>{activeRows.length}</strong> user{activeRows.length === 1 ? "" : "s"} practiced at least one poem
         </div>
 
+        {/* ── Analytics ─────────────────────────────────────────────────────── */}
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", marginBottom: 10 }}>Leaderboard Analytics</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12, marginBottom: 20 }}>
+          {[
+            { label: "Poems Completed", week: analytics.poemsLastWeek, all: analytics.poemsAllTime, fmt: (v: number) => v.toLocaleString() },
+            { label: "Max % Scored (any poem)", week: analytics.maxLastWeek, all: analytics.maxAllTime, fmt: (v: number | null) => v === null ? "—" : `${v}%` },
+            { label: "Average (poems × score)", week: analytics.avgLastWeek, all: analytics.avgAllTime,
+              fmt: (v: { poems: number; pct: number } | null) => v === null ? "—" : `${v.poems} poems · ${v.pct}%` },
+          ].map(({ label, week, all, fmt }) => (
+            <div key={label} style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>{label}</div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1, background: "#0a0f1e", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>Last 7 days</div>
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#f59e0b" }}>{fmt(week as any)}</div>
+                </div>
+                <div style={{ flex: 1, background: "#0a0f1e", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>All time</div>
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#38bdf8" }}>{fmt(all as any)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── User Progress ─────────────────────────────────────────────────── */}
         <div style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", marginBottom: 10 }}>User Progress</div>
         <div style={card}>
-          {rows.length === 0 ? (
-            <p style={{ fontSize: 12, color: "#64748b" }}>No users have signed up yet (besides you).</p>
+          {activeRows.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#64748b" }}>No one has practiced yet.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -150,7 +207,7 @@ export default async function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {activeRows.map((r) => (
                     <tr key={r.id} style={{ borderTop: "1px solid #1e293b" }}>
                       <td style={{ padding: "8px 10px", fontWeight: 600, color: "#e2e8f0" }}>{r.username}</td>
                       <td style={{ padding: "8px 10px" }}>
