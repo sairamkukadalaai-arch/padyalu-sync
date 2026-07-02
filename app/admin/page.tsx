@@ -117,30 +117,60 @@ export default async function AdminPage() {
   // Users who have attempted at least one poem
   const activeRows = rows.filter((r) => r.poemsDone > 0);
 
-  // Analytics helpers
+  // Leaderboard helpers
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const recentAttempts = allAttempts.filter((a) => a.created_at >= oneWeekAgo);
 
-  function poemsCompleted(attemptList: AttemptRow[]) {
-    return attemptList.length;
-  }
-  function maxScore(attemptList: AttemptRow[]) {
-    if (attemptList.length === 0) return null;
-    return Math.max(...attemptList.map((a) => a.final_score));
-  }
-  function avgStats(attemptList: AttemptRow[]) {
-    if (attemptList.length === 0) return null;
-    const totalScore = attemptList.reduce((s, a) => s + a.final_score, 0);
-    return { poems: attemptList.length, pct: Math.round(totalScore / attemptList.length) };
+  // Top 5 by poems completed (distinct poems per user)
+  function topByPoemsCompleted(attemptList: AttemptRow[], n = 5) {
+    const byUser = new Map<string, Set<string>>();
+    for (const a of attemptList) {
+      if (!byUser.has(a.user_id)) byUser.set(a.user_id, new Set());
+      byUser.get(a.user_id)!.add(a.poem_id);
+    }
+    return Array.from(byUser.entries())
+      .map(([uid, poems]) => ({ username: usernameById.get(uid) ?? "Unknown", value: poems.size }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, n);
   }
 
-  const analytics = {
-    poemsLastWeek: poemsCompleted(recentAttempts),
-    poemsAllTime: poemsCompleted(allAttempts),
-    maxLastWeek: maxScore(recentAttempts),
-    maxAllTime: maxScore(allAttempts),
-    avgLastWeek: avgStats(recentAttempts),
-    avgAllTime: avgStats(allAttempts),
+  // Top 5 by max score in any single attempt
+  function topByMaxScore(attemptList: AttemptRow[], n = 5) {
+    const byUser = new Map<string, number>();
+    for (const a of attemptList) {
+      byUser.set(a.user_id, Math.max(byUser.get(a.user_id) ?? 0, a.final_score));
+    }
+    return Array.from(byUser.entries())
+      .map(([uid, value]) => ({ username: usernameById.get(uid) ?? "Unknown", value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, n);
+  }
+
+  // Top 5 by average score across all their attempts (unique poems best score)
+  function topByAvgScore(attemptList: AttemptRow[], n = 5) {
+    const byUser = new Map<string, Map<string, number>>();
+    for (const a of attemptList) {
+      if (!byUser.has(a.user_id)) byUser.set(a.user_id, new Map());
+      const m = byUser.get(a.user_id)!;
+      m.set(a.poem_id, Math.max(m.get(a.poem_id) ?? 0, a.final_score));
+    }
+    return Array.from(byUser.entries())
+      .map(([uid, poems]) => {
+        const scores = Array.from(poems.values());
+        const avg = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+        return { username: usernameById.get(uid) ?? "Unknown", poems: scores.length, value: avg };
+      })
+      .sort((a, b) => b.value - a.value || b.poems - a.poems)
+      .slice(0, n);
+  }
+
+  const leaderboards = {
+    poemsWeek: topByPoemsCompleted(recentAttempts),
+    poemsAll: topByPoemsCompleted(allAttempts),
+    maxWeek: topByMaxScore(recentAttempts),
+    maxAll: topByMaxScore(allAttempts),
+    avgWeek: topByAvgScore(recentAttempts),
+    avgAll: topByAvgScore(allAttempts),
   };
 
   const BG = "#030712";
@@ -162,29 +192,41 @@ export default async function AdminPage() {
           Signed in as <strong>{usernameById.get(user.id) ?? user.email}</strong> · <strong>{activeRows.length}</strong> user{activeRows.length === 1 ? "" : "s"} practiced at least one poem
         </div>
 
-        {/* ── Analytics ─────────────────────────────────────────────────────── */}
+        {/* ── Leaderboard Analytics ─────────────────────────────────────────── */}
         <div style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", marginBottom: 10 }}>Leaderboard Analytics</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12, marginBottom: 20 }}>
-          {[
-            { label: "Poems Completed", week: analytics.poemsLastWeek, all: analytics.poemsAllTime, fmt: (v: number) => v.toLocaleString() },
-            { label: "Max % Scored (any poem)", week: analytics.maxLastWeek, all: analytics.maxAllTime, fmt: (v: number | null) => v === null ? "—" : `${v}%` },
-            { label: "Average (poems × score)", week: analytics.avgLastWeek, all: analytics.avgAllTime,
-              fmt: (v: { poems: number; pct: number } | null) => v === null ? "—" : `${v.poems} poems · ${v.pct}%` },
-          ].map(({ label, week, all, fmt }) => (
-            <div key={label} style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>{label}</div>
-              <div style={{ display: "flex", gap: 12 }}>
-                <div style={{ flex: 1, background: "#0a0f1e", borderRadius: 8, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>Last 7 days</div>
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#f59e0b" }}>{fmt(week as any)}</div>
-                </div>
-                <div style={{ flex: 1, background: "#0a0f1e", borderRadius: 8, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>All time</div>
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#38bdf8" }}>{fmt(all as any)}</div>
-                </div>
-              </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 14, marginBottom: 20 }}>
+          {([
+            { title: "# Poems Completed · Last 7 Days",  rows: leaderboards.poemsWeek, col: "Poems",   fmt: (r: {username:string;value:number}) => `${r.value}` },
+            { title: "# Poems Completed · All Time",      rows: leaderboards.poemsAll,  col: "Poems",   fmt: (r: {username:string;value:number}) => `${r.value}` },
+            { title: "Max % Scored · Last 7 Days",        rows: leaderboards.maxWeek,   col: "Score",   fmt: (r: {username:string;value:number}) => `${r.value}%` },
+            { title: "Max % Scored · All Time",           rows: leaderboards.maxAll,    col: "Score",   fmt: (r: {username:string;value:number}) => `${r.value}%` },
+            { title: "Average Score · Last 7 Days",       rows: leaderboards.avgWeek,   col: "Avg",     fmt: (r: {username:string;value:number;poems?:number}) => `${r.poems} poems · ${r.value}%` },
+            { title: "Average Score · All Time",          rows: leaderboards.avgAll,    col: "Avg",     fmt: (r: {username:string;value:number;poems?:number}) => `${r.poems} poems · ${r.value}%` },
+          ] as const).map(({ title, rows, col, fmt }) => (
+            <div key={title} style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>{title}</div>
+              {rows.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#475569" }}>No data yet.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: "#475569", fontSize: 10, textTransform: "uppercase" }}>
+                      <th style={{ textAlign: "left", padding: "3px 6px", width: 20 }}>#</th>
+                      <th style={{ textAlign: "left", padding: "3px 6px" }}>Name</th>
+                      <th style={{ textAlign: "right", padding: "3px 6px" }}>{col}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(rows as {username:string;value:number;poems?:number}[]).map((r, i) => (
+                      <tr key={r.username} style={{ borderTop: "1px solid #1e293b" }}>
+                        <td style={{ padding: "5px 6px", color: i === 0 ? "#f59e0b" : "#475569", fontWeight: 700 }}>{i + 1}</td>
+                        <td style={{ padding: "5px 6px", color: "#e2e8f0", fontWeight: i === 0 ? 700 : 400 }}>{r.username}</td>
+                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#38bdf8", fontWeight: 600 }}>{fmt(r)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           ))}
         </div>
