@@ -73,23 +73,46 @@ export default async function AdminPage() {
 
   if (!myProfile || myProfile.role !== "admin") redirect("/");
 
-  // Use service role for admin data queries — bypasses RLS to reliably fetch
-  // all rows. The admin gate above already ensures only admins reach this point.
+  // Use service role for admin data queries — bypasses RLS.
+  // Paginate in chunks of 1000 to defeat PostgREST's server-side max_rows cap.
   const svc = createServiceClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  const [{ data: profiles }, { data: attempts }, { data: suggestions }] = await Promise.all([
-    svc.from("profiles").select("id, username, role, created_at").order("created_at", { ascending: true }).range(0, 9999),
-    svc.from("attempts").select("user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at").range(0, 999999),
-    svc.from("suggestions").select("id, user_id, poem_id, message, created_at").order("created_at", { ascending: false }).range(0, 9999),
+  async function fetchAll<T>(
+    table: string,
+    select: string,
+    orderCol: string,
+    ascending = true
+  ): Promise<T[]> {
+    const PAGE = 1000;
+    const result: T[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await svc
+        .from(table)
+        .select(select)
+        .order(orderCol, { ascending })
+        .range(from, from + PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      result.push(...(data as T[]));
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return result;
+  }
+
+  const [profiles, attempts, suggestions] = await Promise.all([
+    fetchAll<ProfileRow>("profiles", "id, username, role, created_at", "created_at", true),
+    fetchAll<AttemptRow>("attempts", "user_id, poem_id, final_score, sync_score, timing_score, rhythm_score, lyrics_score, created_at", "created_at", true),
+    fetchAll<SuggestionRow>("suggestions", "id, user_id, poem_id, message, created_at", "created_at", false),
   ]);
 
-  const allProfiles = (profiles ?? []) as ProfileRow[];
-  const allAttempts = (attempts ?? []) as AttemptRow[];
-  const allSuggestions = (suggestions ?? []) as SuggestionRow[];
+  const allProfiles = profiles;
+  const allAttempts = attempts;
+  const allSuggestions = suggestions;
 
   const usernameById = new Map(allProfiles.map((p) => [p.id, p.username]));
 
